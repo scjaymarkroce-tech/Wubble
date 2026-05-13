@@ -9,6 +9,48 @@ Build a **simple top‑down roguelike** with reusable components and minimal art
 - **Engine:** Godot 4.4.1
 - **Style:** 2D top‑down
 - **Animation:** procedural wobble (sine scale/rotation)
+- **Input Actions:** `move_up`, `move_down`, `move_left`, `move_right`, `attack`
+
+---
+
+## ✅ Progress So Far
+
+### ✅ Wobble Animation Component
+**Attach to:** `Sprite2D` or `AnimatedSprite2D`  
+**Behavior:** sine scale + rotation, supports idle wobble + moving wobble.
+
+Key settings:
+- `speed`
+- `amount`
+- `x_sway`
+- `rotation_amount`
+- `only_when_moving`
+- `idle_scale_multiplier`
+- `idle_rotation_amount`
+- `velocity_provider` (set to `../` if wobble is on Sprite2D)
+
+---
+
+### ✅ Player Movement (Input Map)
+Movement now uses the new input actions:
+- `move_up`
+- `move_down`
+- `move_left`
+- `move_right`
+
+Player script uses:
+```gdscript
+Input.get_action_strength("move_right") - Input.get_action_strength("move_left")
+Input.get_action_strength("move_down") - Input.get_action_strength("move_up")
+```
+
+---
+
+### ✅ Player Visuals
+Player uses **AnimatedSprite2D** with HP‑based animations:
+- `idle_hp1`, `attack_hp1`
+- `idle_hp2`, `attack_hp2`
+- `idle_hp3`, `attack_hp3`
 
 ---
 
@@ -18,15 +60,9 @@ Build a **simple top‑down roguelike** with reusable components and minimal art
 **Purpose:** Fake idle/walk animation via sine scaling & rotation.  
 **Attach to:** any `Sprite2D` or `AnimatedSprite2D`.
 
-**Settings:**
-- `speed` (float)
-- `amount` (float)
-- `x_sway` (float)
-- `only_when_moving` (bool)
-
 ---
 
-### 2) Stats Component
+### 2) Stats Component (Planned)
 Reusable stats for players/enemies.
 
 **Stats:**
@@ -44,25 +80,14 @@ Reusable stats for players/enemies.
 
 ---
 
-### 3) Damage Visuals (Player)
-Player has **3 HP**, each HP has a unique sprite.
-
-| HP | Sprite |
-|----|--------|
-| 3  | Normal |
-| 2  | Damaged 1 |
-| 1  | Damaged 2 |
-
----
-
 ## Player Design
 
 ### Movement
 - Top‑down WASD/Analog
 - Uses wobble component for idle/walk
 
-### Bow
-Bow is a **separate Sprite2D** with 3 images:
+### Bow (Next Step)
+Bow is a **separate Sprite2D** with 3 images: use animated sprite 2d and you give name to the animation
 1. **Default** (aims at mouse)
 2. **Pulled** (holding)
 3. **Ready** (arrow visible on bow)
@@ -73,7 +98,7 @@ Bow is a **separate Sprite2D** with 3 images:
 
 ---
 
-## Enemies (Current)
+## Enemies (Current Plan)
 
 ### 1) Zombie
 - Chases player
@@ -128,10 +153,10 @@ Bow is a **separate Sprite2D** with 3 images:
 ## Development Roadmap
 
 ### Phase 1 — Core Loop
-- Movement + wobble
-- Bow shooting + arrow
-- 1 enemy (zombie)
-- 1 room with door lock/unlock
+- ✅ Movement + wobble
+- ⏳ Bow shooting + arrow
+- ⏳ 1 enemy (zombie)
+- ⏳ 1 room with door lock/unlock
 
 ### Phase 2 — Expand Enemies
 - Bomb
@@ -149,13 +174,7 @@ Bow is a **separate Sprite2D** with 3 images:
 
 ---
 
-## Asset Notes
-- No walking animations required
-- Use procedural wobble for life
-- Keep assets simple and readable
-
----
-
 ## Next Step
-Start by building **one test room** and the **core loop**:
-> Move → Shoot → Kill → Door unlock
+Start building **bow shooting + arrow**.
+
+Move → Shoot → Kill → Door unlock
