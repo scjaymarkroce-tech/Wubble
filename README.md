@@ -202,7 +202,7 @@ All enemies use `Hurtbox` (Area2D, mask 3) to detect arrows via `area_entered`. 
 ### 3) Slime ✅
 
 - Chases player
-- Contact damage: **1**
+- Plays 'attack' and shoots slime attack on 4 directions (N,E,S,W) so he moves a little, shoots, then moves again, that's his behavior
 - On death: spawns **3 smaller slimes** at scaled-down size, spread in a circle
 - Child slimes (`is_child=true`) do not spawn further slimes on death
 
