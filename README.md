@@ -284,13 +284,13 @@ Arrow (Area2D) — Arrow.gd    layer 3, mask 2
 
 ### Phase 3 — Room System 🔲
 
-- [ ] Single test room with walls and doors
-- [ ] Door closes on player entry
-- [ ] Door opens when all enemies are dead
-- [ ] Enemy container node — room tracks `tree_exited` per enemy
+- [ ] Single test room with walls and portal
+- [ ] Portal closes on player entry
+- [ ] Portal opens when all enemies are dead
+- [ ] Enemy container node — room tracks `tree_exited` per enemy (not sure)
 - [ ] 7 rooms total, each full screen
 - [ ] Room types: normal, boss, witch (NPC)
-- [ ] Center hub room with 4 exits
+- [ ] Center hub room with 4 exits (portal)
 - [ ] Random room type assignment
 
 ### Phase 4 — Gear System 🔲
