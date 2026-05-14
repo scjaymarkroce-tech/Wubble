@@ -22,25 +22,39 @@ res://
 │   ├── components/
 │   │   ├── WobbleComponent.gd
 │   │   └── StatsComponent.gd
-│   ├── Player.gd
-│   ├── Bow.gd
-│   ├── Arrow.gd
-│   ├── Player.tscn
-│   ├── Arrow.tscn
-│   └── globals/
-│       ├── Effects.gd              (autoload)
+│   ├── globals/
+│   │   └── Effects.gd              (autoload)
+│   ├── player/
+│   │   ├── Player.gd
+│   │   ├── Bow.gd
+│   │   └── Arrow.gd
 │   └── enemies/
 │       ├── Zombie.gd
 │       ├── Bomb.gd
 │       ├── Slime.gd
-        ├── Zombie.tscn
+│       ├── Ghost.gd
+│       ├── GhostArrow.gd
+│       ├── Spidy.gd
+│       ├── SpidyWeb.gd
+│       ├── Mushy.gd
+│       └── MushySpore.gd
+├── scenes/
+│   ├── player/
+│   │   ├── Player.tscn
+│   │   └── Arrow.tscn
+│   └── enemies/
+│       ├── Zombie.tscn
 │       ├── Bomb.tscn
 │       ├── Slime.tscn
-│       └── Ghost.tscn
-│       └── Ghost.gd
-├── assets/
-│   └── shaders/
-│       └── hit_flash.gdshader
+│       ├── Ghost.tscn
+│       ├── GhostArrow.tscn
+│       ├── Spidy.tscn
+│       ├── SpidyWeb.tscn
+│       ├── Mushy.tscn
+│       └── MushySpore.tscn
+└── assets/
+    └── shaders/
+        └── hit_flash.gdshader
 ```
 
 ---
@@ -52,7 +66,7 @@ res://
 | 1 | player | Player body |
 | 2 | enemies | All enemy bodies, ContactArea, Hurtbox |
 | 3 | player_arrows | Arrow (Area2D) |
-| 4 | enemy_projectiles | Ghost arrow, future projectiles |
+| 4 | enemy_projectiles | GhostArrow, SpidyWeb, MushySpore |
 
 | Node | Layer | Mask |
 |------|-------|------|
@@ -107,7 +121,7 @@ Wobble automatically switches between moving and idle values based on `set_movin
 
 ### 3) Effects (Autoload)
 
-**File:** `scripts/Effects.gd`
+**File:** `scripts/globals/Effects.gd`
 **Register as:** Autoload named `Effects` in Project Settings
 
 All effects are spawned purely in code using `CPUParticles2D` — no nodes need to be added to any scene.
@@ -118,12 +132,15 @@ All effects are spawned purely in code using `CPUParticles2D` — no nodes need 
 |----------|-------|---------|
 | `BROWN` | Brown | Player arrow impact |
 | `DARK_GREEN` | Dark green | Zombie |
-| `GREEN` | Green | Slime |
+| `BLUE` | Blue | Slime |
 | `BLACK_SMOKE` | Near black | Bomb |
 | `DIRTY_WHITE` | Off-white | Ghost |
 | `ORANGE` | Orange | Bomb fire |
 | `YELLOW` | Yellow | Bomb flash |
 | `RED` | Red | Bomb sparks |
+| `SPIDY_RED` | Dark red | Spidy hit/death |
+| `SPIDY_WEB` | Near white | SpidyWeb trail |
+| `MUSHY_RED` | Red | Mushy hit/death |
 
 #### Public API
 
@@ -135,9 +152,11 @@ All effects are spawned purely in code using `CPUParticles2D` — no nodes need 
 | `projectile_trail(pos, color)` | Small puff trail for enemy projectiles |
 | `explosion(pos)` | 4-layer bomb explosion: smoke, fire, flash, sparks |
 | `zombie_death(pos)` | Dark green burst |
-| `slime_death(pos)` | Green burst + downward drip |
+| `slime_death(pos)` | Blue burst + downward drip |
 | `ghost_death(pos)` | Dirty white burst + upward wisp float |
-| `death_bounce(enemy, on_done)` | Knock up + fall off screen + spin, random left/right direction |
+| `spidy_death(pos)` | Dark red burst + lighter red pop |
+| `mushy_death(pos)` | Red burst + white spore spots burst |
+| `death_bounce(enemy, on_done)` | Knock up + fall off screen + spin, random left/right |
 
 #### Hit Flash Shader
 
@@ -146,13 +165,14 @@ Only pixels with `alpha > 0.01` are flashed white — transparent background is 
 
 #### Death Bounce
 
-Called from all enemies except Slime. Behavior:
+Called from all enemies except Slime and Bomb. Behavior:
 - Flips sprite upside down instantly (negative `scale.y`)
 - Knocks enemy upward `-120px` with random left/right drift
 - Falls `800px` off screen with spin in knock direction
-- `queue_free` fires after 3 second buffer to ensure it's off screen
+- `queue_free` fires after 3 second buffer to ensure it is off screen
 
-Slime skips `death_bounce` — it spawns children and frees immediately.
+Slime skips `death_bounce` — spawns children then frees immediately.
+Bomb skips `death_bounce` — explosion handles its own exit.
 
 ---
 
@@ -166,6 +186,7 @@ Player (CharacterBody2D) — Player.gd       group: "player"
 ├── AnimatedSprite2D
 │   └── WobbleComponent
 ├── CollisionShape2D
+├── Camera2D                                Current=true
 └── Bow (Node2D) — Bow.gd
     └── BowAnimatedSpirte2d (AnimatedSprite2D)
 ```
@@ -192,6 +213,29 @@ Player (CharacterBody2D) — Player.gd       group: "player"
 ### Bow Flow
 
 Hold mouse → `pulled` → `ready` → release → spawn Arrow → `default`
+
+### Dash
+
+| Constant | Value |
+|----------|-------|
+| `DASH_SPEED` | 500.0 |
+| `DASH_DURATION` | 0.25 |
+| `DASH_COOLDOWN` | 0.9 |
+| `GHOST_INTERVAL` | 0.04 |
+| `GHOST_COLOR` | Brown at 45% alpha |
+
+- Input: `dash` action (default: Shift)
+- Direction priority: keyboard input first, mouse direction if no key pressed
+- Sprite rolls (spins) in the dash direction during the dash
+- Player is **invincible** during dash — `take_contact_damage` returns early
+- Brown ghost trail spawns every `GHOST_INTERVAL` seconds, fades out over 0.2s
+- Ghost uses exact current animation frame texture
+
+### Arrow Knockback and Screenshake
+
+- On fire: player receives knockback `150.0` away from shot direction
+- Camera shakes strength `2.5` for `0.12s` on every arrow fired
+- Both values are constants tunable at top of `Player.gd`
 
 ### Notes
 
@@ -233,26 +277,29 @@ All enemies use `Hurtbox` (Area2D, mask 3) to detect arrows via `area_entered`. 
 ### Shared On-Hit Behavior
 
 Every enemy calls these two lines in `take_damage()`:
+
 ```gdscript
 Effects.hit_flash(anim)
 Effects.contact_damage(global_position, ENEMY_COLOR)
 ```
 
-### Shared Death Behavior (except Slime)
+### Shared Death Behavior (except Slime and Bomb)
 
 ```gdscript
 set_physics_process(false)
-contact_area.monitoring = false
-hurtbox.monitoring = false
+contact_area.set_deferred("monitoring", false)
+hurtbox.set_deferred("monitoring", false)
 Effects.death_bounce(self, queue_free)
 ```
+
+Note: always use `set_deferred("monitoring", false)` — setting it directly inside a signal callback causes a physics lock error.
 
 ---
 
 ### 1) Zombie ✅
 
 - Chases player continuously
-- On contact: plays `attack` animation briefly, deals contact damage
+- On contact: plays `attack` animation briefly then returns to `walk`
 - Death: dark green burst + death bounce
 
 **Stats:** `speed=60`, `contact_damage=1`, `max_hp=2`
@@ -262,9 +309,9 @@ Effects.death_bounce(self, queue_free)
 ### 2) Bomb ✅
 
 - Chases player, plays `walk`
-- Within `trigger_distance` → stops, plays `attack`, wobble disabled, starts shrinking slowly over fuse duration
-- After `fuse_time` → pops to 2.2x scale briefly → explodes in radius → damages player + all enemies in radius
-- Also triggers fuse on death by arrow (does not explode instantly — fuse runs first)
+- Within `trigger_distance` → stops, plays `attack`, wobble disabled, shrinks slowly over fuse duration
+- After `fuse_time` → pops to 2.2x scale → explodes in radius → damages player + all enemies in radius
+- Arrow kill triggers fuse first, does not explode instantly
 - Explosion: 4-layer particle effect (smoke, fire, flash, sparks)
 - No death bounce — explosion is its exit
 
@@ -278,12 +325,13 @@ Effects.death_bounce(self, queue_free)
 
 - Chases player
 - Contact damage: **1**
-- On death: spawns **3 smaller slimes** at scaled-down size, spread in a circle
+- On death: spawns 3 smaller slimes at scaled-down size, spread in a circle
 - Child slimes (`is_child=true`) do not spawn further slimes on death
 - No death bounce — spawns children then frees immediately via `call_deferred`
 
 **Stats:** `speed=45`, `contact_damage=1`, `max_hp=2`
 **Exports:** `slime_scene` (assign `Slime.tscn`), `child_scale=0.55`, `child_count=3`
+**Effects color:** Blue
 
 ---
 
@@ -297,13 +345,69 @@ Effects.death_bounce(self, queue_free)
   4. Plays `attack` for `windup_before_shoot` (0.3s)
   5. Fires `shoot_count` arrows with squish scale effect per shot
   6. Short wait → goes invisible, repeats
-- Squish on each shot: shrinks to 0.6x → pops to 1.35x → returns to base, arrow fires at pop moment
+- Squish per shot: shrinks to 0.6x → pops to 1.35x → returns to base, arrow fires at pop moment
+- Uses dedicated `GhostArrow.tscn` (layer 4, mask 1) — not the player Arrow
 - **Can only be damaged while visible** (`modulate.a >= 0.5`)
 - Death: dirty white burst + upward wisp + death bounce
 
 **Stats:** `speed=0`, `max_hp=3`
-**Exports:** `arrow_scene`, `arrow_speed=200`, `shoot_count=3`, `shoot_interval=0.4`, `invisible_duration=3.0`, `teleport_radius=120`, `walk_before_attack=0.3`, `windup_before_shoot=0.3`
+**Exports:** `ghost_arrow_scene`, `arrow_speed=200`, `shoot_count=3`, `shoot_interval=0.4`, `invisible_duration=3.0`, `teleport_radius=120`, `walk_before_attack=0.3`, `windup_before_shoot=0.3`
 **Scale:** `BASE_SCALE = Vector2(0.14, 0.14)`
+
+---
+
+### 5) Spidy ✅
+
+- Chases player for `chase_time` seconds, then stops and attacks
+- Attack: squishes small (hold 0.5s) → pops → fires webs in 4 cardinal directions (N, E, S, W) simultaneously
+- Returns to chasing after attack
+- Wobble disabled during attack
+- Death: dark red burst + death bounce
+
+**Stats:** `speed=65`, `contact_damage=1`, `max_hp=2`
+**Exports:** `web_scene` (assign `SpidyWeb.tscn`), `web_speed=160`, `chase_time=2.5`
+**Scale:** `BASE_SCALE = Vector2(0.15, 0.15)`
+**Effects color:** `SPIDY_RED`
+
+#### SpidyWeb Projectile
+
+```
+SpidyWeb (Area2D) — SpidyWeb.gd    layer 4, mask 1
+├── Sprite2D                        (web image)
+└── CollisionShape2D
+```
+
+- Trail color: `SPIDY_WEB` (near white)
+- Damage: 1, Lifetime: 2.0s
+- Connect: `body_entered → _on_body_entered`, `area_entered → _on_area_entered`
+
+---
+
+### 6) Mushy ✅
+
+- Chases player for `chase_time` seconds, then stops and attacks
+- Attack: squishes small (hold 0.5s) → pops → fires spores in 4 diagonal directions (NE, SE, SW, NW) simultaneously
+- Spore rotates on its own axis while traveling (`rotate_speed=5.0`)
+- Returns to chasing after attack
+- Wobble disabled during attack
+- Death: red burst + white spore spots burst + death bounce
+
+**Stats:** `speed=55`, `contact_damage=1`, `max_hp=2`
+**Exports:** `spore_scene` (assign `MushySpore.tscn`), `spore_speed=140`, `chase_time=2.5`
+**Scale:** `BASE_SCALE = Vector2(0.15, 0.15)`
+**Effects color:** `MUSHY_RED`
+
+#### MushySpore Projectile
+
+```
+MushySpore (Area2D) — MushySpore.gd    layer 4, mask 1
+├── Sprite2D                             (spore image)
+└── CollisionShape2D
+```
+
+- Trail color: `MUSHY_RED`
+- Damage: 1, Lifetime: 2.0s, `rotate_speed=5.0`
+- Connect: `body_entered → _on_body_entered`, `area_entered → _on_area_entered`
 
 ---
 
@@ -343,6 +447,7 @@ Arrow (Area2D) — Arrow.gd    layer 3, mask 2
 | `move_left` | A / Left Arrow |
 | `move_right` | D / Right Arrow |
 | `shoot` | Mouse Button Left |
+| `dash` | Shift |
 
 ---
 
@@ -363,7 +468,10 @@ Arrow (Area2D) — Arrow.gd    layer 3, mask 2
 - [x] Bomb (fuse + explosion radius + shrink scale during fuse)
 - [x] Slime (split on death, no bounce)
 - [x] Ghost (invisible + teleport + walk + windup + shoot with squish)
+- [x] Spidy (chase + 4-way web burst with squish + pop delay)
+- [x] Mushy (chase + 4-diagonal spore burst with squish + pop delay + rotating spore)
 - [x] Hurtbox system for arrow detection
+- [x] Dedicated GhostArrow projectile (layer 4)
 - [x] Collision layer/mask documentation
 
 ### Phase 2.5 — Effects ✅
@@ -371,12 +479,23 @@ Arrow (Area2D) — Arrow.gd    layer 3, mask 2
 - [x] Effects autoload (CPUParticles2D, no scene nodes needed)
 - [x] Arrow impact particles (brown)
 - [x] Contact damage particles (per enemy color)
-- [x] Projectile trail (enemy arrows only)
+- [x] Projectile trail (enemy projectiles only)
 - [x] Hit flash shader (non-transparent pixels only)
-- [x] Death particles per enemy (zombie, slime, ghost)
+- [x] Death particles per enemy (zombie, slime, ghost, spidy, mushy)
 - [x] Bomb explosion (4-layer: smoke, fire, flash, sparks)
 - [x] Death bounce animation (knock up, random direction, spin, fall off screen)
 - [x] Bomb fuse shrink + pop scale tween
+- [x] Ghost squish scale per shot
+- [x] Spidy and Mushy squish + pop delay before firing
+
+### Phase 2.6 — Player Feel ✅
+
+- [x] Dash with invincibility frames
+- [x] Brown ghost trail during dash
+- [x] Dash direction: keyboard priority, mouse fallback
+- [x] Sprite rolls in dash direction
+- [x] Arrow firing knockback (150.0 force)
+- [x] Camera screenshake on arrow fire (strength 2.5, duration 0.12s)
 
 ### Phase 3 — Room System 🔲
 
