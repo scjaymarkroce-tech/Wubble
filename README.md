@@ -28,30 +28,50 @@ res://
 │   │   ├── Player.gd
 │   │   ├── Bow.gd
 │   │   └── Arrow.gd
-│   └── enemies/
-│       ├── Zombie.gd
-│       ├── Bomb.gd
-│       ├── Slime.gd
-│       ├── Ghost.gd
-│       ├── GhostArrow.gd
-│       ├── Spidy.gd
-│       ├── SpidyWeb.gd
-│       ├── Mushy.gd
-│       └── MushySpore.gd
+│   ├── enemies/
+│   │   ├── Zombie.gd
+│   │   ├── Bomb.gd
+│   │   ├── Slime.gd
+│   │   ├── Ghost.gd
+│   │   ├── GhostArrow.gd
+│   │   ├── Spidy.gd
+│   │   ├── SpidyWeb.gd
+│   │   ├── Mushy.gd
+│   │   └── MushySpore.gd
+│   ├── rooms/
+│   │   ├── Room.gd
+│   │   └── RoomData.gd
+│   ├── ui/
+│   │   └── Portal.gd
+│   └── world/
+│       └── World.gd
 ├── scenes/
 │   ├── player/
 │   │   ├── Player.tscn
 │   │   └── Arrow.tscn
-│   └── enemies/
-│       ├── Zombie.tscn
-│       ├── Bomb.tscn
-│       ├── Slime.tscn
-│       ├── Ghost.tscn
-│       ├── GhostArrow.tscn
-│       ├── Spidy.tscn
-│       ├── SpidyWeb.tscn
-│       ├── Mushy.tscn
-│       └── MushySpore.tscn
+│   ├── enemies/
+│   │   ├── Zombie.tscn
+│   │   ├── Bomb.tscn
+│   │   ├── Slime.tscn
+│   │   ├── Ghost.tscn
+│   │   ├── GhostArrow.tscn
+│   │   ├── Spidy.tscn
+│   │   ├── SpidyWeb.tscn
+│   │   ├── Mushy.tscn
+│   │   └── MushySpore.tscn
+│   ├── rooms/
+│   │   ├── RoomHub.tscn
+│   │   ├── RoomNormal1.tscn
+│   │   ├── RoomNormal2.tscn
+│   │   ├── RoomNormal3.tscn
+│   │   ├── RoomNormal4.tscn
+│   │   ├── RoomNormal5.tscn
+│   │   ├── RoomNormal6.tscn
+│   │   ├── RoomWitch1.tscn
+│   │   ├── RoomBoss.tscn
+│   │   └── Portal.tscn
+│   └── world/
+│       └── World.tscn
 └── assets/
     └── shaders/
         └── hit_flash.gdshader
@@ -67,6 +87,7 @@ res://
 | 2 | enemies | All enemy bodies, ContactArea, Hurtbox |
 | 3 | player_arrows | Arrow (Area2D) |
 | 4 | enemy_projectiles | GhostArrow, SpidyWeb, MushySpore |
+| 5 | walls | Boundaries StaticBody2D in each room |
 
 | Node | Layer | Mask |
 |------|-------|------|
@@ -76,6 +97,7 @@ res://
 | Hurtbox (on enemies) | 2 | 3 |
 | Arrow | 3 | 2 |
 | Enemy projectiles | 4 | 1 |
+| Boundaries | 5 | - |
 
 ---
 
@@ -157,6 +179,7 @@ All effects are spawned purely in code using `CPUParticles2D` — no nodes need 
 | `spidy_death(pos)` | Dark red burst + lighter red pop |
 | `mushy_death(pos)` | Red burst + white spore spots burst |
 | `death_bounce(enemy, on_done)` | Knock up + fall off screen + spin, random left/right |
+| `spawn_preview(pos, color)` | 3-layer burst effect at enemy spawn position before enemy appears |
 
 #### Hit Flash Shader
 
@@ -173,6 +196,16 @@ Called from all enemies except Slime and Bomb. Behavior:
 
 Slime skips `death_bounce` — spawns children then frees immediately.
 Bomb skips `death_bounce` — explosion handles its own exit.
+
+
+#### Spawn Preview
+Called by Room.gd before enemies appear. Returns a Node2D root containing 3 particle layers — caller is responsible for queue_free() on the returned node after the delay:
+
+| Layer | Description | 
+|----------|-------|
+| `Enemy color burst` | 40 particles, all directions, continuous | 
+| `Black accent burst` | 20 smaller dark particles mixed in | 
+| `White sparkle burst` | 15 fast bright particles for pop | 
 
 ---
 
@@ -237,12 +270,19 @@ Hold mouse → `pulled` → `ready` → release → spawn Arrow → `default`
 - Camera shakes strength `2.5` for `0.12s` on every arrow fired
 - Both values are constants tunable at top of `Player.gd`
 
+### Death
+
+- _on_death() calls call_deferred("_deferred_death")
+- _deferred_death() guards with is_inside_tree() then pauses the tree
+- Game over is a placeholder print("GAME OVER") — full UI in future phase
+- World.reset() is called externally when UI is implemented to unpause and reload Hub
+- 
 ### Notes
 
 - No sprite flipping
 - Bow rotates to follow mouse via `look_at()`
 - `set_attacking(bool)` called by Bow to switch player animation between `idle_hpX` and `attack_hpX`
-- Death uses `call_deferred` to avoid physics callback crash
+- Death uses call_deferred to avoid physics callback crash
 - Contact damage triggers `hit_flash` + red `contact_damage` particles
 
 ---
@@ -450,6 +490,93 @@ Arrow (Area2D) — Arrow.gd    layer 3, mask 2
 | `dash` | Shift |
 
 ---
+## Room System
+
+### World Scene Tree
+World (Node2D) — World.gd
+├── RoomContainer (Node)
+└── Player (Player.tscn — instanced)
+
+Player lives in World, never inside a Room. World repositions the player to each room's PlayerSpawn on load. This ensures HP and gear persist across rooms without re-instantiation.
+
+## Room Scene Tree (all rooms share this structure)
+RoomXxx (Node2D) — Room.gd
+├── Boundaries (StaticBody2D)       4 CollisionShape2D surrounding the map (N,E,S,W) — layer 5
+├── Tiles (Node2D)
+│   ├── grass (TileMapLayer)
+│   ├── water (TileMapLayer)
+│   └── designs (TileMapLayer)
+├── EnemyContainer (Node2D)
+├── SpawnArea (Node2D)
+│   └── SpawnPolygon (Polygon2D)    draw spawn zone manually in editor, avoiding walls and portal
+├── Portals (Node2D)
+│   └── Portal (Portal.tscn)        position manually in editor
+└── PlayerSpawn (Marker2D)          place at room center
+
+
+## Portal Scene Tree
+Portal (Area2D) — Portal.gd    layer 0, mask 1
+├── AnimatedSprite2D               animations: "open", "closed"
+└── CollisionShape2D
+
+## Room Sequence
+[Hub] → [R1] → [R2] → [Witch] → [R3] → [R4] → [Witch] → [R5] → [R6] → [Witch] → [Boss] → (loop back to Hub)
+
+## Room IDs and Types
+| ID | Type | Scene |
+|----------|-------|---------|
+| `0` | HUB | RoomHub.tscn |
+| `1` | NORMAL | RoomNormal1.tscn |
+| `2` | NORMAL | RoomNormal2.tscn |
+| `3` | WITCH | RoomWitch1.tscn |
+| `4` | NORMAL | RoomNormal3.tscn |
+| `5` | NORMAL | RoomNormal4.tscn |
+| `6` | WITCH | RoomWitch1.tscn |
+| `7` | NORMAL | RoomNormal5.tscn |
+| `8` | NORMAL | RoomNormal6.tscn |
+| `9` | WITCH | RoomWitch1.tscn |
+| `10` | BOSS | RoomBoss.tscn |
+
+## Enemy Pool Per Normal Room
+| Room | Enemy Pool | 
+|----------|-------|
+| `N1 (id 1)` | Zombie, Slime |
+| `N2 (id 2)` | Zombie, Slime, Bomb |
+| `N3 (id 4)` | Zombie, Slime, Bomb, Spidy |
+| `N4 (id 5)` | Zombie, Slime, Bomb, Spidy, Mushy|
+| `N5 (id 7)` | Zombie, Bomb, Spidy, Mushy, Ghost |
+| `N6 (id 8)` | Zombie, Bomb, Spidy, Mushy, Ghost |
+| `BOSS (id 10)` | All 6, always 10 enemies |
+
+Each normal room spawns 7–10 enemies (random). Witch and Hub rooms spawn none.
+
+## Enemy Scaling (Cycles)
+
+- Every time the player clears Boss and loops back to Hub, cycle increments by 1
+- Every enemy spawned receives +2 max_hp per cycle injected after instantiation via StatsComponent
+- Player keeps HP and gear across cycles — only enemies scale
+
+## Enemy Spawn Sequence
+
+- Room loads — all spawn positions calculated immediately from SpawnPolygon
+- spawn_preview() particle effect fires at every spawn position simultaneously (3-layer burst in enemy color)
+- After SPAWN_DELAY (2.0s) — particles freed, enemies instantiated at their positions
+- Each enemy scales from Vector2.ZERO to normal scale over SPAWN_SCALE_DURATION (0.25s) using Tween.TRANS_BACK for a pop-in bounce feel
+
+## Portal Behavior
+
+- All portals start closed on room load (collision disabled, "closed" animation)
+- HUB and WITCH rooms open portals immediately in start()
+- NORMAL and BOSS rooms open portals only after _enemies_remaining reaches 0
+- Portal uses a 2-frame physics delay (await get_tree().physics_frame x2) before detecting player body — prevents instant trigger on spawn
+
+## Game Over (Placeholder)
+
+- Player death pauses the tree (get_tree().paused = true)
+- print("GAME OVER") is the current placeholder
+- World.reset() exists ready for UI wiring — resets cycle = 0, unpauses, loads Hub
+- Full Game Over UI planned for a future phase
+
 
 ## Development Roadmap
 
@@ -476,37 +603,47 @@ Arrow (Area2D) — Arrow.gd    layer 3, mask 2
 
 ### Phase 2.5 — Effects ✅
 
-- [x] Effects autoload (CPUParticles2D, no scene nodes needed)
-- [x] Arrow impact particles (brown)
-- [x] Contact damage particles (per enemy color)
-- [x] Projectile trail (enemy projectiles only)
-- [x] Hit flash shader (non-transparent pixels only)
-- [x] Death particles per enemy (zombie, slime, ghost, spidy, mushy)
-- [x] Bomb explosion (4-layer: smoke, fire, flash, sparks)
-- [x] Death bounce animation (knock up, random direction, spin, fall off screen)
-- [x] Bomb fuse shrink + pop scale tween
-- [x] Ghost squish scale per shot
-- [x] Spidy and Mushy squish + pop delay before firing
+ - [x] Effects autoload (CPUParticles2D, no scene nodes needed)
+ - [x] Arrow impact particles (brown)
+ - [x] Contact damage particles (per enemy color)
+ - [x] Projectile trail (enemy projectiles only)
+ - [x] Hit flash shader (non-transparent pixels only)
+ - [x] Death particles per enemy (zombie, slime, ghost, spidy, mushy)
+ - [x] Bomb explosion (4-layer: smoke, fire, flash, sparks)
+ - [x] Death bounce animation (knock up, random direction, spin, fall off screen)
+ - [x] Bomb fuse shrink + pop scale tween
+ - [x] Ghost squish scale per shot
+ - [x] Spidy and Mushy squish + pop delay before firing
 
 ### Phase 2.6 — Player Feel ✅
 
-- [x] Dash with invincibility frames
-- [x] Brown ghost trail during dash
-- [x] Dash direction: keyboard priority, mouse fallback
-- [x] Sprite rolls in dash direction
-- [x] Arrow firing knockback (150.0 force)
-- [x] Camera screenshake on arrow fire (strength 2.5, duration 0.12s)
+ - [x] Dash with invincibility frames
+ - [x] Brown ghost trail during dash
+ - [x] Dash direction: keyboard priority, mouse fallback
+ - [x] Sprite rolls in dash direction
+ - [x] Arrow firing knockback (150.0 force)
+ - [x] Camera screenshake on arrow fire (strength 2.5, duration 0.12s)
 
 ### Phase 3 — Room System 🔲
 
-- [ ] Single test room with walls and portal
-- [ ] Portal closes on player entry
-- [ ] Portal opens when all enemies are dead
-- [ ] Enemy container node — room tracks `tree_exited` per enemy
-- [ ] 7 rooms total, each full screen
-- [ ] Room types: normal, boss, witch (NPC)
-- [ ] Center hub room with 4 exits (portal)
-- [ ] Random room type assignment
+ - [x] World scene with RoomContainer and persistent Player
+ - [x] Room.gd base script shared by all room scenes
+ - [x] RoomData resource injected at runtime by World.gd
+ - [x] 11 rooms total: Hub, 6 Normal, 3 Witch (shared scene), 1 Boss
+ - [x] Linear room sequence with single exit portal per room
+ - [x] Portal opens only after all enemies cleared (NORMAL/BOSS)
+ - [x] Portal opens immediately (HUB/WITCH)
+ - [x] Portal physics frame delay prevents instant trigger on player spawn
+ - [x] Enemy container tracks tree_exited per enemy
+ - [x] Curated enemy pool per normal room (easier early, harder late)
+ - [x] Random 7–10 enemies per normal room
+ - [x] Enemy spawn delay (2.0s) with spawn_preview() particle effect
+ - [x] Spawn positions from Polygon2D drawn manually per room
+ - [x] Enemy pop-in scale tween on spawn (TRANS_BACK)
+ - [x] Enemy HP scaling per cycle (+2 max_hp per cycle)
+ - [x] Player HP and gear persist across rooms and cycles
+ - [x] Boss loop resets room sequence, increments cycle
+ - [x] Game over placeholder (pause + print, World.reset() ready)
 
 ### Phase 4 — Gear System 🔲
 
@@ -525,7 +662,8 @@ Arrow (Area2D) — Arrow.gd    layer 3, mask 2
 ## Asset Notes
 
 - No walking animations required — wobble handles the feel
-- Two animations per enemy: `walk`, `attack`
-- Six animations for player: `idle_hp1/2/3`, `attack_hp1/2/3`
-- Three animations for bow: `default`, `pulled`, `ready`
+- Two animations per enemy: walk, attack
+- Six animations for player: idle_hp1/2/3, attack_hp1/2/3
+- Three animations for bow: default, pulled, ready
+- Two animations for portal: open, closed
 - Keep sprites simple and readable
