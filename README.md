@@ -91,8 +91,8 @@ res://
 
 | Node | Layer | Mask |
 |------|-------|------|
-| Player | 1 | 2, 4 |
-| Enemy CharacterBody2D | 2 | 1, 3 |
+| Player | 1 | 2, 4, 5|
+| Enemy CharacterBody2D | 2 | 1, 3, 5 |
 | ContactArea (on enemies) | 2 | 1 |
 | Hurtbox (on enemies) | 2 | 3 |
 | Arrow | 3 | 2 |
@@ -493,9 +493,11 @@ Arrow (Area2D) — Arrow.gd    layer 3, mask 2
 ## Room System
 
 ### World Scene Tree
+```
 World (Node2D) — World.gd
 ├── RoomContainer (Node)
 └── Player (Player.tscn — instanced)
+```
 
 Player lives in World, never inside a Room. World repositions the player to each room's PlayerSpawn on load. This ensures HP and gear persist across rooms without re-instantiation.
 
@@ -624,7 +626,7 @@ Each normal room spawns 7–10 enemies (random). Witch and Hub rooms spawn none.
  - [x] Arrow firing knockback (150.0 force)
  - [x] Camera screenshake on arrow fire (strength 2.5, duration 0.12s)
 
-### Phase 3 — Room System 🔲
+### Phase 3 — Room System ✅
 
  - [x] World scene with RoomContainer and persistent Player
  - [x] Room.gd base script shared by all room scenes
@@ -654,7 +656,7 @@ Each normal room spawns 7–10 enemies (random). Witch and Hub rooms spawn none.
 
 ### Phase 5 — Boss 🔲
 
-- [ ] 5 bosses planned (designs TBD)
+- [ ] 1 boss minimum (designs TBD)
 - [ ] Boss room type
 
 ---
