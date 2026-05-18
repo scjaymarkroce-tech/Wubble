@@ -21,9 +21,12 @@ res://
 ├── scripts/
 │   ├── components/
 │   │   ├── WobbleComponent.gd
-│   │   └── StatsComponent.gd
+│   │   ├── StatsComponent.gd
+│   │   ├── KnockbackComponent.gd
+│   │   └── StatusComponent.gd
 │   ├── globals/
-│   │   └── Effects.gd              (autoload)
+│   │   ├── Effects.gd              (autoload)
+│   │   └── GearManager.gd          (autoload)
 │   ├── player/
 │   │   ├── Player.gd
 │   │   ├── Bow.gd
@@ -91,7 +94,7 @@ res://
 
 | Node | Layer | Mask |
 |------|-------|------|
-| Player | 1 | 2, 4, 5|
+| Player | 1 | 2, 4, 5 |
 | Enemy CharacterBody2D | 2 | 1, 3, 5 |
 | ContactArea (on enemies) | 2 | 1 |
 | Hurtbox (on enemies) | 2 | 3 |
@@ -132,6 +135,7 @@ Wobble automatically switches between moving and idle values based on `set_movin
 | `max_hp` | int |
 | `hp` | int |
 | `speed` | float |
+| `base_speed` | float (set automatically on _ready, used by gear reset) |
 | `damage` | int |
 | `attack_speed` | float |
 | `contact_damage` | int |
@@ -141,7 +145,48 @@ Wobble automatically switches between moving and idle values based on `set_movin
 
 ---
 
-### 3) Effects (Autoload)
+### 3) Knockback Component
+
+**File:** `scripts/components/KnockbackComponent.gd`
+**Attach to:** any enemy as a child `Node` (same level as StatsComponent)
+
+Owns the knockback vector for each enemy. Enemies call `knockback_component.update(delta)` each physics frame and add the result to their velocity.
+
+| Method | Description |
+|--------|-------------|
+| `apply(direction, force)` | Adds a knockback impulse |
+| `update(delta) -> Vector2` | Decays and returns current knockback offset |
+
+| Constant | Value |
+|----------|-------|
+| `DECAY` | 2.5 |
+
+---
+
+### 4) Status Component
+
+**File:** `scripts/components/StatusComponent.gd`
+**Attach to:** any enemy as a child `Node` (same level as StatsComponent)
+
+Manages timed status effects (slow, burn). Enemies call `status.update(delta, self)` each physics frame.
+
+| Method | Description |
+|--------|-------------|
+| `apply_slow(duration)` | Slows enemy to 35% speed for duration |
+| `apply_burn(damage, duration)` | Applies burn DOT, ticks every 0.8s |
+| `is_slowed() -> bool` | True if slow is active |
+| `is_burning() -> bool` | True if burn is active |
+| `get_speed_multiplier() -> float` | Returns 0.35 if slowed, 1.0 otherwise |
+| `get_animation_prefix() -> String` | Returns `"frost"`, `"burned"`, or `""` |
+| `update(delta, owner_node)` | Ticks timers, applies burn damage |
+
+Animation prefix is used by `_play_anim(base)` in each enemy. When status animations are added to sprite frames, they follow the naming convention `frost_walk`, `frost_attack`, `burned_walk`, `burned_attack`. The system falls back to the base animation if the status animation doesn't exist yet.
+
+When both slow and burn are active, burn takes priority for the animation prefix.
+
+---
+
+### 5) Effects (Autoload)
 
 **File:** `scripts/globals/Effects.gd`
 **Register as:** Autoload named `Effects` in Project Settings
@@ -197,15 +242,73 @@ Called from all enemies except Slime and Bomb. Behavior:
 Slime skips `death_bounce` — spawns children then frees immediately.
 Bomb skips `death_bounce` — explosion handles its own exit.
 
-
 #### Spawn Preview
-Called by Room.gd before enemies appear. Returns a Node2D root containing 3 particle layers — caller is responsible for queue_free() on the returned node after the delay:
 
-| Layer | Description | 
-|----------|-------|
-| `Enemy color burst` | 40 particles, all directions, continuous | 
-| `Black accent burst` | 20 smaller dark particles mixed in | 
-| `White sparkle burst` | 15 fast bright particles for pop | 
+Called by Room.gd before enemies appear. Returns a Node2D root containing 3 particle layers — caller is responsible for `queue_free()` on the returned node after the delay:
+
+| Layer | Description |
+|-------|-------------|
+| Enemy color burst | 40 particles, all directions, continuous |
+| Black accent burst | 20 smaller dark particles mixed in |
+| White sparkle burst | 15 fast bright particles for pop |
+
+---
+
+### 6) Gear Manager (Autoload)
+
+**File:** `scripts/globals/GearManager.gd`
+**Register as:** Autoload named `GearManager` in Project Settings
+
+Manages the player's equipped gears. Holds gear state, handles witch room offer flow, and reapplies all gear effects to the player whenever the loadout changes.
+
+#### Rules
+
+- Max 2 gears equipped at once
+- Same gear cannot be equipped twice
+- Player can skip the witch offer entirely (press 0) — portal opens regardless
+- When slots are full and player picks a new gear, they choose which slot to replace
+
+#### Gear List
+
+| Gear | Effect | Tradeoff |
+|------|--------|----------|
+| 🪶 Split Feather | Mirrors all forward arrows to opposite direction | +10% reload time |
+| ⚡ Fast Hands | -35% reload time | -20% arrow damage |
+| 🦶 Swift Boots | +30 move speed | -15% dash duration |
+| 🌪 Side Step | -40% dash cooldown | -10% dash duration |
+| 🪵 Longbow String | +1.0s arrow lifetime | -10% arrow speed |
+| 🧱 Blunt Arrows | Arrows apply 450 knockback force | -15% arrow speed |
+| 🧊 Frost Tip | Arrows slow enemies for 3.0s | +15% reload time |
+| 💨 Light Frame | +55% dash duration (longer distance) | -15 move speed |
+| 🔥 Ember String | Arrows apply burn (1 dmg/tick, 3s) | -10% arrow damage |
+| 🔥 Triple Shot | Fires 3 arrows per shot | +35% reload time |
+| 🪡 Needle Tip | +60% arrow speed | -0.8s arrow lifetime |
+| 🌫 Soft Soles | Dash leaves a decoy that attracts enemies | +20% dash cooldown |
+| ⚔ Piercing Tip | Arrows pierce 1 enemy | -0.4s arrow lifetime |
+
+#### Split Feather + Triple Shot Combo
+
+When both are equipped: Triple Shot fires 3 arrows forward, Split Feather mirrors those 3 arrows in the exact opposite direction — 6 arrows total, 3 outward each side.
+
+#### Witch Room Offer Flow (Keyboard Placeholder)
+
+- Prints 3 random gear options to console (weighted toward unowned gears)
+- Press `1` / `2` / `3` to pick a gear
+- Press `0` to skip — portal opens immediately
+- If slots full, prompted to choose which gear to replace (press `1` or `2`)
+- Press `0` during swap prompt to cancel and return to offer
+
+#### Public API
+
+| Method | Description |
+|--------|-------------|
+| `register_player(p)` | Called by Player on ready |
+| `offer_gears()` | Called by Room.gd in witch rooms |
+| `apply_gears(p)` | Resets and reapplies all gear effects to player |
+| `has_gear(g) -> bool` | Returns true if gear is equipped |
+| `reset()` | Clears all gear state — called by World.reset() |
+
+Signal: `offer_resolved` — emitted when offer is closed (picked or skipped). Room.gd awaits this before opening the portal.
 
 ---
 
@@ -221,7 +324,7 @@ Player (CharacterBody2D) — Player.gd       group: "player"
 ├── CollisionShape2D
 ├── Camera2D                                Current=true
 └── Bow (Node2D) — Bow.gd
-    └── BowAnimatedSpirte2d (AnimatedSprite2D)
+    └── BowAnimatedSprite2d (AnimatedSprite2D)
 ```
 
 ### Animations (AnimatedSprite2D)
@@ -247,13 +350,27 @@ Player (CharacterBody2D) — Player.gd       group: "player"
 
 Hold mouse → `pulled` → `ready` → release → spawn Arrow → `default`
 
+### Ammo System
+
+| Constant | Value |
+|----------|-------|
+| `MAX_AMMO` | 7 |
+| `BASE_RELOAD_TIME` | 3.5s |
+
+- Player has 7 ammo before reloading
+- Reload starts automatically when ammo hits 0
+- `reload_time_multiplier` is modified by gears (Fast Hands, Frost Tip, etc.)
+- `_on_ammo_changed()` is the UI hook — currently prints to console
+- `can_shoot() -> bool` — checked by Bow before firing
+- `consume_ammo()` — called by Bow on each fire
+
 ### Dash
 
 | Constant | Value |
 |----------|-------|
 | `DASH_SPEED` | 500.0 |
-| `DASH_DURATION` | 0.25 |
-| `DASH_COOLDOWN` | 0.9 |
+| `BASE_DASH_DURATION` | 0.25 |
+| `BASE_DASH_COOLDOWN` | 0.9 |
 | `GHOST_INTERVAL` | 0.04 |
 | `GHOST_COLOR` | Brown at 45% alpha |
 
@@ -263,26 +380,55 @@ Hold mouse → `pulled` → `ready` → release → spawn Arrow → `default`
 - Player is **invincible** during dash — `take_contact_damage` returns early
 - Brown ghost trail spawns every `GHOST_INTERVAL` seconds, fades out over 0.2s
 - Ghost uses exact current animation frame texture
+- Dash duration and cooldown are scaled by `dash_duration_multiplier` and `dash_cooldown_multiplier` from gear
+
+### Soft Soles Decoy
+
+When `dash_leaves_decoy` is true (Soft Soles gear):
+- A `Node2D` decoy is spawned at dash start position
+- Decoy joins the `"player"` group
+- Real player temporarily leaves the `"player"` group
+- Enemies retarget to decoy (via 1.5s retarget interval)
+- Decoy fades over 2.5s then frees itself, real player rejoins group
 
 ### Arrow Knockback and Screenshake
 
 - On fire: player receives knockback `150.0` away from shot direction
 - Camera shakes strength `2.5` for `0.12s` on every arrow fired
-- Both values are constants tunable at top of `Player.gd`
+
+### Gear Stats (on Player)
+
+All gear-modified values are vars on Player, reset to base by `reset_gear_stats()` and reapplied by `GearManager.apply_gears()` every time loadout changes.
+
+| Var | Default | Modified By |
+|-----|---------|-------------|
+| `shot_count` | 1 | Triple Shot |
+| `split_shot` | false | Split Feather |
+| `reload_time_multiplier` | 1.0 | Fast Hands, Frost Tip, Triple Shot, Split Feather |
+| `arrow_damage_multiplier` | 1.0 | Fast Hands, Ember String |
+| `arrow_speed_multiplier` | 1.0 | Longbow String, Blunt Arrows, Needle Tip |
+| `arrow_lifetime_bonus` | 0.0 | Longbow String, Needle Tip, Piercing Tip |
+| `arrow_knockback_force` | 0.0 | Blunt Arrows |
+| `arrow_slow_duration` | 0.0 | Frost Tip |
+| `arrow_burn_damage` | 0 | Ember String |
+| `arrow_pierce_count` | 0 | Piercing Tip |
+| `dash_duration_multiplier` | 1.0 | Swift Boots, Side Step, Light Frame |
+| `dash_cooldown_multiplier` | 1.0 | Side Step, Soft Soles |
+| `dash_leaves_decoy` | false | Soft Soles |
 
 ### Death
 
-- _on_death() calls call_deferred("_deferred_death")
-- _deferred_death() guards with is_inside_tree() then pauses the tree
-- Game over is a placeholder print("GAME OVER") — full UI in future phase
-- World.reset() is called externally when UI is implemented to unpause and reload Hub
-- 
+- `_on_death()` calls `call_deferred("_deferred_death")`
+- `_deferred_death()` guards with `is_inside_tree()` then pauses the tree
+- Game over is a placeholder `print("GAME OVER")` — full UI in future phase
+- `World.reset()` is called externally when UI is implemented to unpause and reload Hub
+
 ### Notes
 
 - No sprite flipping
 - Bow rotates to follow mouse via `look_at()`
 - `set_attacking(bool)` called by Bow to switch player animation between `idle_hpX` and `attack_hpX`
-- Death uses call_deferred to avoid physics callback crash
+- Death uses `call_deferred` to avoid physics callback crash
 - Contact damage triggers `hit_flash` + red `contact_damage` particles
 
 ---
@@ -297,6 +443,8 @@ Enemy (CharacterBody2D)
 ├── AnimatedSprite2D
 │   └── WobbleComponent
 ├── CollisionShape2D
+├── KnockbackComponent
+├── StatusComponent
 ├── ContactArea (Area2D)     layer 2, mask 1
 │   └── CollisionShape2D
 └── Hurtbox (Area2D)         layer 2, mask 3
@@ -309,14 +457,28 @@ Enemy (CharacterBody2D)
 |-----------|---------|
 | `walk` | chasing / moving |
 | `attack` | attacking / fusing / shooting |
+| `frost_walk` | walk while slowed (placeholder until art added) |
+| `frost_attack` | attack while slowed (placeholder until art added) |
+| `burned_walk` | walk while burning (placeholder until art added) |
+| `burned_attack` | attack while burning (placeholder until art added) |
+
+Status animations fall back to base (`walk` / `attack`) if not present in sprite frames.
+
+### Shared Behavior
+
+All enemies:
+- Cache player reference via `get_nodes_in_group("player")[0]` — retarget every 1.5s via `_retarget_timer` so they track the Soft Soles decoy correctly
+- `player` var typed as `Node2D` (not `CharacterBody2D`) to allow decoy retargeting
+- Call `status.update(delta, self)` every physics frame
+- Add `knockback_component.update(delta)` to velocity every physics frame
+- Use `_play_anim(base: String)` which prepends the status prefix and falls back to base if status animation missing
+- Expose `apply_knockback(direction, force)`, `apply_slow(duration)`, `apply_burn(damage, duration)`
 
 ### Arrow Detection Pattern
 
-All enemies use `Hurtbox` (Area2D, mask 3) to detect arrows via `area_entered`. The arrow destroys itself on hitting any area named `"Hurtbox"`. Enemies do **not** rely on `body_entered` from the arrow. Arrow provides `get_damage()` as the duck-type contract all hurtboxes use.
+All enemies use `Hurtbox` (Area2D, mask 3) to detect arrows via `area_entered`. Arrow destroys itself after hitting. Enemies call `take_damage(area.get_damage())` via duck-type.
 
 ### Shared On-Hit Behavior
-
-Every enemy calls these two lines in `take_damage()`:
 
 ```gdscript
 Effects.hit_flash(anim)
@@ -331,8 +493,6 @@ contact_area.set_deferred("monitoring", false)
 hurtbox.set_deferred("monitoring", false)
 Effects.death_bounce(self, queue_free)
 ```
-
-Note: always use `set_deferred("monitoring", false)` — setting it directly inside a signal callback causes a physics lock error.
 
 ---
 
@@ -469,12 +629,24 @@ Arrow (Area2D) — Arrow.gd    layer 3, mask 2
 ### Behavior
 
 - Moves in launch direction every `_process`
-- Destroys itself on hitting a body or any area named `"Hurtbox"`
-- `_hit` flag prevents double-hit in same frame
+- Destroys itself after exceeding pierce count or on lifetime expiry
+- `_destroyed` flag prevents double-free
+- `_hit_targets` array prevents hitting the same enemy twice (supports pierce)
 - `get_damage()` method used by enemy hurtboxes as duck-type contract
 - Fires `Effects.arrow_impact()` on any destroy including expiry
 - `trail_color` export — set to enemy color for enemy projectiles, leave `Color.TRANSPARENT` for player arrow (no trail)
 - `trail_interval` default `0.12` — controls spacing between trail puffs
+
+### Gear-Injected Fields (set by Bow._fire)
+
+| Field | Default | Gear |
+|-------|---------|------|
+| `knockback_force` | 0.0 | Blunt Arrows |
+| `slow_duration` | 0.0 | Frost Tip |
+| `burn_damage` | 0 | Ember String |
+| `pierce_count` | 0 | Piercing Tip |
+
+On hit, arrow calls `apply_knockback`, `apply_slow`, `apply_burn` on target via `has_method` duck-type — safe to call even if enemy doesn't implement them.
 
 ---
 
@@ -490,9 +662,11 @@ Arrow (Area2D) — Arrow.gd    layer 3, mask 2
 | `dash` | Shift |
 
 ---
+
 ## Room System
 
 ### World Scene Tree
+
 ```
 World (Node2D) — World.gd
 ├── RoomContainer (Node)
@@ -501,7 +675,9 @@ World (Node2D) — World.gd
 
 Player lives in World, never inside a Room. World repositions the player to each room's PlayerSpawn on load. This ensures HP and gear persist across rooms without re-instantiation.
 
-## Room Scene Tree (all rooms share this structure)
+### Room Scene Tree (all rooms share this structure)
+
+```
 RoomXxx (Node2D) — Room.gd
 ├── Boundaries (StaticBody2D)       4 CollisionShape2D surrounding the map (N,E,S,W) — layer 5
 ├── Tiles (Node2D)
@@ -514,71 +690,81 @@ RoomXxx (Node2D) — Room.gd
 ├── Portals (Node2D)
 │   └── Portal (Portal.tscn)        position manually in editor
 └── PlayerSpawn (Marker2D)          place at room center
+```
 
+### Portal Scene Tree
 
-## Portal Scene Tree
+```
 Portal (Area2D) — Portal.gd    layer 0, mask 1
 ├── AnimatedSprite2D               animations: "open", "closed"
 └── CollisionShape2D
+```
 
-## Room Sequence
+### Room Sequence
+
+```
 [Hub] → [R1] → [R2] → [Witch] → [R3] → [R4] → [Witch] → [R5] → [R6] → [Witch] → [Boss] → (loop back to Hub)
+```
 
-## Room IDs and Types
+### Room IDs and Types
+
 | ID | Type | Scene |
-|----------|-------|---------|
-| `0` | HUB | RoomHub.tscn |
-| `1` | NORMAL | RoomNormal1.tscn |
-| `2` | NORMAL | RoomNormal2.tscn |
-| `3` | WITCH | RoomWitch1.tscn |
-| `4` | NORMAL | RoomNormal3.tscn |
-| `5` | NORMAL | RoomNormal4.tscn |
-| `6` | WITCH | RoomWitch1.tscn |
-| `7` | NORMAL | RoomNormal5.tscn |
-| `8` | NORMAL | RoomNormal6.tscn |
-| `9` | WITCH | RoomWitch1.tscn |
-| `10` | BOSS | RoomBoss.tscn |
+|----|------|-------|
+| 0 | HUB | RoomHub.tscn |
+| 1 | NORMAL | RoomNormal1.tscn |
+| 2 | NORMAL | RoomNormal2.tscn |
+| 3 | WITCH | RoomWitch1.tscn |
+| 4 | NORMAL | RoomNormal3.tscn |
+| 5 | NORMAL | RoomNormal4.tscn |
+| 6 | WITCH | RoomWitch1.tscn |
+| 7 | NORMAL | RoomNormal5.tscn |
+| 8 | NORMAL | RoomNormal6.tscn |
+| 9 | WITCH | RoomWitch1.tscn |
+| 10 | BOSS | RoomBoss.tscn |
 
-## Enemy Pool Per Normal Room
-| Room | Enemy Pool | 
-|----------|-------|
-| `N1 (id 1)` | Zombie, Slime |
-| `N2 (id 2)` | Zombie, Slime, Bomb |
-| `N3 (id 4)` | Zombie, Slime, Bomb, Spidy |
-| `N4 (id 5)` | Zombie, Slime, Bomb, Spidy, Mushy|
-| `N5 (id 7)` | Zombie, Bomb, Spidy, Mushy, Ghost |
-| `N6 (id 8)` | Zombie, Bomb, Spidy, Mushy, Ghost |
-| `BOSS (id 10)` | All 6, always 10 enemies |
+### Enemy Pool Per Normal Room
+
+| Room | Enemy Pool |
+|------|------------|
+| N1 (id 1) | Zombie, Slime |
+| N2 (id 2) | Zombie, Slime, Bomb |
+| N3 (id 4) | Zombie, Slime, Bomb, Spidy |
+| N4 (id 5) | Zombie, Slime, Bomb, Spidy, Mushy |
+| N5 (id 7) | Zombie, Bomb, Spidy, Mushy, Ghost |
+| N6 (id 8) | Zombie, Bomb, Spidy, Mushy, Ghost |
+| BOSS (id 10) | All 6, always 10 enemies |
 
 Each normal room spawns 7–10 enemies (random). Witch and Hub rooms spawn none.
 
-## Enemy Scaling (Cycles)
+### Enemy Scaling (Cycles)
 
 - Every time the player clears Boss and loops back to Hub, cycle increments by 1
 - Every enemy spawned receives +2 max_hp per cycle injected after instantiation via StatsComponent
 - Player keeps HP and gear across cycles — only enemies scale
 
-## Enemy Spawn Sequence
+### Enemy Spawn Sequence
 
 - Room loads — all spawn positions calculated immediately from SpawnPolygon
-- spawn_preview() particle effect fires at every spawn position simultaneously (3-layer burst in enemy color)
-- After SPAWN_DELAY (2.0s) — particles freed, enemies instantiated at their positions
-- Each enemy scales from Vector2.ZERO to normal scale over SPAWN_SCALE_DURATION (0.25s) using Tween.TRANS_BACK for a pop-in bounce feel
+- `spawn_preview()` particle effect fires at every spawn position simultaneously (3-layer burst in enemy color)
+- After `SPAWN_DELAY` (2.0s) — particles freed, enemies instantiated at their positions
+- Each enemy scales from `Vector2.ZERO` to normal scale over `SPAWN_SCALE_DURATION` (0.25s) using `Tween.TRANS_BACK` for a pop-in bounce feel
 
-## Portal Behavior
+### Portal Behavior
 
-- All portals start closed on room load (collision disabled, "closed" animation)
-- HUB and WITCH rooms open portals immediately in start()
-- NORMAL and BOSS rooms open portals only after _enemies_remaining reaches 0
-- Portal uses a 2-frame physics delay (await get_tree().physics_frame x2) before detecting player body — prevents instant trigger on spawn
+- All portals start closed on room load (collision disabled, `"closed"` animation)
+- HUB rooms open portals immediately in `start()`
+- WITCH rooms call `GearManager.offer_gears()`, await `GearManager.offer_resolved`, then open portal
+- NORMAL and BOSS rooms open portals only after `_enemies_remaining` reaches 0
+- Portal uses a 2-frame physics delay (`await get_tree().physics_frame x2`) before detecting player body — prevents instant trigger on spawn
 
-## Game Over (Placeholder)
+### Game Over (Placeholder)
 
-- Player death pauses the tree (get_tree().paused = true)
-- print("GAME OVER") is the current placeholder
-- World.reset() exists ready for UI wiring — resets cycle = 0, unpauses, loads Hub
+- Player death pauses the tree (`get_tree().paused = true`)
+- `print("GAME OVER")` is the current placeholder
+- `World.reset()` exists ready for UI wiring — resets `cycle = 0`, clears `GearManager`, unpauses, loads Hub
 - Full Game Over UI planned for a future phase
 
+---
 
 ## Development Roadmap
 
@@ -605,67 +791,100 @@ Each normal room spawns 7–10 enemies (random). Witch and Hub rooms spawn none.
 
 ### Phase 2.5 — Effects ✅
 
- - [x] Effects autoload (CPUParticles2D, no scene nodes needed)
- - [x] Arrow impact particles (brown)
- - [x] Contact damage particles (per enemy color)
- - [x] Projectile trail (enemy projectiles only)
- - [x] Hit flash shader (non-transparent pixels only)
- - [x] Death particles per enemy (zombie, slime, ghost, spidy, mushy)
- - [x] Bomb explosion (4-layer: smoke, fire, flash, sparks)
- - [x] Death bounce animation (knock up, random direction, spin, fall off screen)
- - [x] Bomb fuse shrink + pop scale tween
- - [x] Ghost squish scale per shot
- - [x] Spidy and Mushy squish + pop delay before firing
+- [x] Effects autoload (CPUParticles2D, no scene nodes needed)
+- [x] Arrow impact particles (brown)
+- [x] Contact damage particles (per enemy color)
+- [x] Projectile trail (enemy projectiles only)
+- [x] Hit flash shader (non-transparent pixels only)
+- [x] Death particles per enemy (zombie, slime, ghost, spidy, mushy)
+- [x] Bomb explosion (4-layer: smoke, fire, flash, sparks)
+- [x] Death bounce animation (knock up, random direction, spin, fall off screen)
+- [x] Bomb fuse shrink + pop scale tween
+- [x] Ghost squish scale per shot
+- [x] Spidy and Mushy squish + pop delay before firing
 
 ### Phase 2.6 — Player Feel ✅
 
- - [x] Dash with invincibility frames
- - [x] Brown ghost trail during dash
- - [x] Dash direction: keyboard priority, mouse fallback
- - [x] Sprite rolls in dash direction
- - [x] Arrow firing knockback (150.0 force)
- - [x] Camera screenshake on arrow fire (strength 2.5, duration 0.12s)
+- [x] Dash with invincibility frames
+- [x] Brown ghost trail during dash
+- [x] Dash direction: keyboard priority, mouse fallback
+- [x] Sprite rolls in dash direction
+- [x] Arrow firing knockback (150.0 force)
+- [x] Camera screenshake on arrow fire (strength 2.5, duration 0.12s)
 
 ### Phase 3 — Room System ✅
 
- - [x] World scene with RoomContainer and persistent Player
- - [x] Room.gd base script shared by all room scenes
- - [x] RoomData resource injected at runtime by World.gd
- - [x] 11 rooms total: Hub, 6 Normal, 3 Witch (shared scene), 1 Boss
- - [x] Linear room sequence with single exit portal per room
- - [x] Portal opens only after all enemies cleared (NORMAL/BOSS)
- - [x] Portal opens immediately (HUB/WITCH)
- - [x] Portal physics frame delay prevents instant trigger on player spawn
- - [x] Enemy container tracks tree_exited per enemy
- - [x] Curated enemy pool per normal room (easier early, harder late)
- - [x] Random 7–10 enemies per normal room
- - [x] Enemy spawn delay (2.0s) with spawn_preview() particle effect
- - [x] Spawn positions from Polygon2D drawn manually per room
- - [x] Enemy pop-in scale tween on spawn (TRANS_BACK)
- - [x] Enemy HP scaling per cycle (+2 max_hp per cycle)
- - [x] Player HP and gear persist across rooms and cycles
- - [x] Boss loop resets room sequence, increments cycle
- - [x] Game over placeholder (pause + print, World.reset() ready)
+- [x] World scene with RoomContainer and persistent Player
+- [x] Room.gd base script shared by all room scenes
+- [x] RoomData resource injected at runtime by World.gd
+- [x] 11 rooms total: Hub, 6 Normal, 3 Witch (shared scene), 1 Boss
+- [x] Linear room sequence with single exit portal per room
+- [x] Portal opens only after all enemies cleared (NORMAL/BOSS)
+- [x] Portal opens immediately (HUB)
+- [x] Witch rooms offer gear choice before opening portal
+- [x] Portal physics frame delay prevents instant trigger on player spawn
+- [x] Enemy container tracks tree_exited per enemy
+- [x] Curated enemy pool per normal room (easier early, harder late)
+- [x] Random 7–10 enemies per normal room
+- [x] Enemy spawn delay (2.0s) with spawn_preview() particle effect
+- [x] Spawn positions from Polygon2D drawn manually per room
+- [x] Enemy pop-in scale tween on spawn (TRANS_BACK)
+- [x] Enemy HP scaling per cycle (+2 max_hp per cycle)
+- [x] Player HP and gear persist across rooms and cycles
+- [x] Boss loop resets room sequence, increments cycle
+- [x] Game over placeholder (pause + print, World.reset() ready)
 
-### Phase 4 — Gear System 🔲
+### Phase 4 — Gear System ✅
 
-- [ ] Gear pickup base class
-- [ ] Triple shot (3 arrows per fire)
-- [ ] Witch room NPC offers gear choice
-- [ ] Additional gears TBD
+- [x] GearManager autoload (offer, equip, swap, reset)
+- [x] Max 2 gear slots, no duplicate gears
+- [x] Witch room triggers gear offer — player can skip
+- [x] Keyboard-driven offer UI (placeholder — 1/2/3 to pick, 0 to skip)
+- [x] Gear swap flow when slots full
+- [x] KnockbackComponent — reusable, shared by all enemies
+- [x] StatusComponent — reusable slow + burn system, shared by all enemies
+- [x] Enemy retarget timer (1.5s) for Soft Soles decoy compatibility
+- [x] All 13 gears implemented and working:
+  - [x] Split Feather
+  - [x] Fast Hands
+  - [x] Swift Boots
+  - [x] Side Step
+  - [x] Longbow String
+  - [x] Blunt Arrows
+  - [x] Frost Tip
+  - [x] Light Frame
+  - [x] Ember String
+  - [x] Triple Shot
+  - [x] Needle Tip
+  - [x] Soft Soles
+  - [x] Piercing Tip
+- [x] Ammo system (7 ammo, auto-reload)
+- [x] Frost Tip and Ember String status animation hooks (awaiting art)
 
-### Phase 5 — Boss 🔲
+### Phase 5 — Gear UI 🔲
 
-- [ ] 1 boss minimum (designs TBD)
-- [ ] Boss room type
+- [ ] Gear icons (1 per gear)
+- [ ] Gear offer UI (replace keyboard placeholder)
+- [ ] HUD showing equipped gears
+- [ ] Ammo/reload HUD
+- [ ] Longbow String changes bow animations (lb_default, lb_pulled, lb_ready)
+- [ ] Frost Tip adds frost_walk / frost_attack animations to all enemies
+- [ ] Ember String adds burned_walk / burned_attack animations to all enemies
+
+### Phase 6 — Boss 🔲
+
+- [ ] 1 boss minimum (design TBD)
+- [ ] Boss room implementation
 
 ---
 
 ## Asset Notes
 
 - No walking animations required — wobble handles the feel
-- Two animations per enemy: walk, attack
-- Six animations for player: idle_hp1/2/3, attack_hp1/2/3
-- Three animations for bow: default, pulled, ready
-- Two animations for portal: open, closed
+- Two animations per enemy: `walk`, `attack`
+- Optional status animations per enemy: `frost_walk`, `frost_attack`, `burned_walk`, `burned_attack` (system already wired, falls back to base if missing)
+- Six animations for player: `idle_hp1/2/3`, `attack_hp1/2/3`
+- Three animations for bow: `default`, `pulled`, `ready`
+- Optional longbow animations: `lb_default`, `lb_pulled`, `lb_ready`
+- Two animations for portal: `open`, `closed`
 - Keep sprites simple and readable
